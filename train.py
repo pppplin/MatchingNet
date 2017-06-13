@@ -1,30 +1,47 @@
 from one_shot_learning_network import *
-from experiment_builder import ExperimentBuilder
+from experiment_builder import ExperimentBuilder_omniglot, ExperimentBuilder_CIFAR
 import tensorflow.contrib.slim as slim
 import data as dataset
 import tqdm
 from storage import *
+from gpu import define_gpu
+define_gpu(1)   
 
 tf.reset_default_graph()
 
-# Experiment Setup
-batch_size = 32
-fce = False
-classes_per_set = 20
-samples_per_class = 1
-channels = 1
-continue_from_epoch = -1  # use -1 to start from scratch
-epochs = 200
-logs_path = "one_shot_outputs/"
-experiment_name = "one_shot_learning_embedding_{}_{}".format(samples_per_class, classes_per_set)
+train_on_img = True
 
-# Experiment builder
-data = dataset.OmniglotNShotDataset(batch_size=batch_size,
-                                    classes_per_set=classes_per_set, samples_per_class=samples_per_class)
-experiment = ExperimentBuilder(data)
-one_shot_omniglot, losses, c_error_opt_op, init = experiment.build_experiment(batch_size,
-                                                                                     classes_per_set,
-                                                                                     samples_per_class, channels, fce)
+classes_per_set = 5
+samples_per_class = 5
+
+batch_size = 4
+ #32
+fce = False
+
+continue_from_epoch = -1 # use -1 to start from scratch
+epochs = 1
+# epochs = --0-200
+logs_path = "MatchingNet_outputs/"
+
+if train_on_img:
+    channels = 3    
+    experiment_name = logs_path + "cifar_one_shot_learning_embedding_{}_{}".format(samples_per_class, classes_per_set)
+    data = dataset.CIFAR_100(batch_size=batch_size,
+                                        classes_per_set=classes_per_set, samples_per_class=samples_per_class)
+    experiment = ExperimentBuilder_CIFAR(data)
+    one_shot_cifar, losses, c_error_opt_op, init = experiment.build_experiment(batch_size,\
+        classes_per_set, samples_per_class, channels, fce)
+else:
+    channels = 1 
+    experiment_name = logs_path + "one_shot_learning_embedding_{}_{}".format(samples_per_class, classes_per_set)
+    data = dataset.OmniglotNShotDataset(batch_size=batch_size,
+                                        classes_per_set=classes_per_set, samples_per_class=samples_per_class)
+    experiment = ExperimentBuilder_omniglot(data)
+    one_shot_omniglot, losses, c_error_opt_op, init = experiment.build_experiment(batch_size,\
+        classes_per_set, samples_per_class, channels, fce)
+
+           
+
 total_epochs = 300
 total_train_batches = 1000
 total_val_batches = 100
@@ -40,10 +57,11 @@ with tf.Session() as sess:
     if continue_from_epoch != -1: #load checkpoint if needed
         checkpoint = "saved_models/{}_{}.ckpt".format(experiment_name, continue_from_epoch)
         variables_to_restore = []
-        for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES):
-            print(var)
+        print("restoring variables...")
+        for var in tf.get_collection(tf.GraphKeys.VARIABLES):
+            print(var.name)
             variables_to_restore.append(var)
-
+        # 
         tf.logging.info('Fine-tuning from %s' % checkpoint)
 
         fine_tune = slim.assign_from_checkpoint_fn(
@@ -53,8 +71,10 @@ with tf.Session() as sess:
         fine_tune(sess)
 
     best_val = 0.
-    with tqdm.tqdm(total=total_epochs) as pbar_e:
-        for e in range(0, total_epochs):
+    # with tqdm.tqdm(total=total_epochs) as pbar_e:
+    #     for e in range(0, total_epochs):
+    with tqdm.tqdm(total=epochs) as pbar_e:
+        for e in range(0, epochs):
             total_c_loss, total_accuracy = experiment.run_training_epoch(total_train_batches=total_train_batches,
                                                                                 sess=sess)
             print("Epoch {}: train_loss: {}, train_accuracy: {}".format(e, total_c_loss, total_accuracy))
