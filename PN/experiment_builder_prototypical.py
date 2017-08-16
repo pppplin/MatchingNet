@@ -12,7 +12,7 @@ class ExperimentBuilder_CIFAR:
         """
         self.data = data
 
-    def build_experiment(self, batch_size, classes_per_set, samples_per_class, channels, fce):
+    def build_experiment(self, batch_size, classes_per_set, samples_per_class, queries_per_class, channels, fce):
 
         """
         :param batch_size: The experiment batch size
@@ -23,17 +23,16 @@ class ExperimentBuilder_CIFAR:
         :return: a matching_network object, along with the losses, the training ops and the init op
         """
         sequence_size = classes_per_set * samples_per_class
-        # self.classes_per_set = classes_per_set
-        # self.samples_per_class = samples_per_class
-        # self.batch_size = batch_size
-        # self.channels = channels
+        self.queries_per_class = queries_per_class
+        n_queries = classes_per_set*self.queries_per_class
 
         self.support_set_images = tf.placeholder(tf.float32, [batch_size, sequence_size, 32, 32, channels],
                                             'support_set_images')
         self.support_set_labels = tf.placeholder(tf.int32, [batch_size, sequence_size], 'support_set_labels')
 
-        self.target_image = tf.placeholder(tf.float32, [batch_size, 32, 32, channels], 'target_image')
-        self.target_label = tf.placeholder(tf.int32, [batch_size], 'target_label')
+        self.target_image = tf.placeholder(tf.float32, [batch_size, n_queries, 32, 32, channels], 'target_image')
+        self.target_label = tf.placeholder(tf.int32, [batch_size, n_queries], 'target_label')  
+        # 
         self.training_phase = tf.placeholder(tf.bool, name='training-flag')
         self.rotate_flag = tf.placeholder(tf.bool, name='rotate-flag')
         self.keep_prob = tf.placeholder(tf.float32, name='dropout-prob')
@@ -59,26 +58,12 @@ class ExperimentBuilder_CIFAR:
         :param sess: Session object
         :return: mean_training_categorical_crossentropy_loss and mean_training_accuracy
         """
-        # if self.samples_per_class==1:
-        #     sequence_size = 30*self.samples_per_class
-        # else:
-        #     sequence_size = 20*self.samples_per_class
-
-        # self.support_set_images = tf.placeholder(tf.float32, [self.batch_size, sequence_size, 32, 32, self.channels],
-        #                                     'support_set_images')
-        # self.support_set_labels = tf.placeholder(tf.int32, [self.
-        #     batch_size, sequence_size], 'support_set_labels')
 
         total_c_loss = 0.
         total_accuracy = 0.
         with tqdm.tqdm(total=total_train_batches) as pbar:
             for i in range(total_train_batches):  # train epoch
                 x_support_set, y_support_set, x_target, y_target = self.data.get_train_batch()
-                # _, c_loss_value, acc = sess.run(
-                #     [self.c_error_opt_op, self.losses[self.one_shot_cifar.classify], self.losses[self.one_shot_cifar.dn]],
-                #     feed_dict={self.keep_prob: 1.0, self.support_set_images: x_support_set,
-                #                self.support_set_labels: y_support_set, self.target_image: x_target, self.target_label: y_target,
-                #                self.training_phase: True, self.rotate_flag: False, self.learning_rate: self.current_learning_rate})
 
                 _, c_loss_value, acc = sess.run(
                     [self.c_error_opt_op, self.losses["crossentropy_loss"], self.losses[self.one_shot_cifar.dn]],
@@ -95,7 +80,7 @@ class ExperimentBuilder_CIFAR:
                 self.total_train_iter += 1
                 if self.total_train_iter % 2000 == 0:
                     self.current_learning_rate /= 2
-                    print("change learning rate", self.current_learning_rate)
+                    print("changing learning rate", self.current_learning_rate)
 
         total_c_loss = total_c_loss / total_train_batches
         total_accuracy = total_accuracy / total_train_batches

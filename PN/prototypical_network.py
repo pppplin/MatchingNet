@@ -63,15 +63,15 @@ class PrototypicalNet_cifar:
         """
         self.batch_size = batch_size
         self.fce = fce 
-        # self.g = Classifier_cifar_PrototypicalNet(self.batch_size, num_channels=num_channels, layer_sizes=[64, 64, 64 ,64])
         self.g = Classifier_cifar_PrototypicalNet(self.batch_size, num_channels=num_channels, layer_sizes=[16, 16, 16 ,16])
 
         self.dn = DistanceNetwork_Euclidean()
-        # self.classify = AttentionalClassify_prototypical()
         self.support_set_images = support_set_images
         self.support_set_labels = support_set_labels
         self.target_image = target_image
         self.target_label = target_label
+
+        self.queries_per_set = target_label.get_shape().as_list()[1]
         self.keep_prob = keep_prob
         self.is_training = is_training
         # self.k = None
@@ -98,30 +98,43 @@ class PrototypicalNet_cifar:
 
             encode_image_pack = tf.pack(encoded_images, axis = 1)
             class_encode = self.class_encode(support_image = encode_image_pack, support_set_labels = self.support_set_labels,\
-            name = "class_encode", num_samples_per_class = self.num_samples_per_class)
+            name = "class_encode", num_samples_per_class = self.num_samples_per_class) #(nc, bs, 64)
 
-
+            similarities_unpack = []
             for image in tf.unpack(self.target_image, axis = 1):
-                target_single_encode = self.g(image_input=image, training=False, keep_prob=self.keep_prob)
-                similarity = 
-                target_encode.append(temp)
+                target_single_encode = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
+                similarity = self.dn(support_set=class_encode, input_image=target_single_encode, name="distance_calculation",
+                                       training=self.is_training) 
+                similarities_unpack.append(similarity)
 
-            for 
+            similarities = tf.pack(similarities_unpack, axis = 1) #(bs, query, nc)
+
+            preds = tf.nn.softmax(similarities) # (bs, query, nc)
+            correct_prediction = tf.equal(tf.argmax(preds, 2), tf.cast(self.target_label, tf.int64))
+            accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+            crossentropy_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.target_label,logits=similarities))
             
-            # target_encode = tf.pack(target_encode, axis = 1)
-            # # HERE
+            # accuracies = []
+            # target_label_unpack = tf.unpack(self.target_label, axis=1)
 
-            # target_encode = self.g(image_input=self.target_image, training=self.is_training, keep_prob=self.keep_prob)
-            # similarities = self.dn(support_set=class_encode, input_image=target_encode, name="distance_calculation",
-            #                        training=self.is_training)  #get similarity between support set embeddings and target
+            # for i in len(similarities_unpack):
+            #     single_pred = tf.nn.softmax(similarities_unpack[i])
+            #     correct_prediction = tf.equal(tf.argmax(single_pred, 2), tf.cast(target_label_unpack[i], tf.int64))
+            #     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+            #     accuracies.append(accuracy)
+            # accuracy = np.mean(accuracies)
 
-            # preds = tf.nn.softmax(similarities) # produce predictions for target probabilities
-            # # (bs, query, nc)
-            # correct_prediction = tf.equal(tf.argmax(preds, 1), tf.cast(self.target_label, tf.int64))
-            # accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+                        
+            # losses = []
+            # target_label_unpack = tf.unpack(self.target_label, axis=1)
 
-            crossentropy_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.target_label,
-                                                                                              logits=similarities))
+            # for i in self.queries_per_set:
+            #     single_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_label_unpack[i],\
+            #         logits=similarities_unpack[i]))
+            #     losses.append(single_loss)
+
+            # crossentropy_loss = np.mean(lossess)
+
             tf.add_to_collection('crossentropy_losses', crossentropy_loss)
             tf.add_to_collection('accuracy', accuracy)
 
