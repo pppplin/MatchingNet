@@ -1,47 +1,54 @@
 from one_shot_learning_network import *
-from experiment_builder import ExperimentBuilder_omniglot, ExperimentBuilder_CIFAR
+from experiment_builder import ExperimentBuilder
 import tensorflow.contrib.slim as slim
 import data as dataset
 import tqdm
 from storage import *
 from gpu import define_gpu
-define_gpu(1)   
 
+define_gpu(1)   
 tf.reset_default_graph()
 
-train_on_img = True
-
 classes_per_set = 5
-samples_per_class = 5
+classes_train = 10
+samples_per_class = 1
+queries_per_class = 1
+data_name = "cifar"
+network_name = "PN" #MN(matchingnet) or PN(prototypical)
+ 
+batch_size = 32
 
-batch_size = 4
- #32
-fce = False
+continue_from_epoch = -1    # use -1 to start from scratch
+epochs = 10
 
-continue_from_epoch = -1 # use -1 to start from scratch
-epochs = 1
 # epochs = --0-200
-logs_path = "MatchingNet_outputs/"
+logs_path = "outputs/"
 
-if train_on_img:
+fce = False
+experiment_name = logs_path + "{}_{}_{}_{}".format(network_name, data_name, samples_per_class, classes_per_set)
+
+if data_name == "cifar":
     channels = 3    
-    experiment_name = logs_path + "cifar_one_shot_learning_embedding_{}_{}".format(samples_per_class, classes_per_set)
-    data = dataset.CIFAR_100(batch_size=batch_size,
-                                        classes_per_set=classes_per_set, samples_per_class=samples_per_class)
-    experiment = ExperimentBuilder_CIFAR(data)
-    one_shot_cifar, losses, c_error_opt_op, init = experiment.build_experiment(batch_size,\
-        classes_per_set, samples_per_class, channels, fce)
-else:
+    image_size = 32
+    augment = False
+    data = dataset.CIFAR_100(batch_size=batch_size,\
+    classes_per_set=classes_per_set, samples_per_class=samples_per_class, queries_per_class = queries_per_class)
+
+elif data_name=="omniglot":
     channels = 1 
-    experiment_name = logs_path + "one_shot_learning_embedding_{}_{}".format(samples_per_class, classes_per_set)
-    data = dataset.OmniglotNShotDataset(batch_size=batch_size,
-                                        classes_per_set=classes_per_set, samples_per_class=samples_per_class)
-    experiment = ExperimentBuilder_omniglot(data)
-    one_shot_omniglot, losses, c_error_opt_op, init = experiment.build_experiment(batch_size,\
-        classes_per_set, samples_per_class, channels, fce)
-
+    image_size = 28
+    augment = True
+    data = dataset.OmniglotNShotDataset(batch_size=batch_size,\
+        classes_per_set=classes_per_set, samples_per_class=samples_per_class, queries_per_class = queries_per_class)
+else:
+    print("Unsupported dataset.")
+    assert False
            
+experiment = ExperimentBuilder(data)
+one_shot, losses, c_error_opt_op, init = experiment.build_experiment(batch_size,\
+    classes_per_set, samples_per_class, queries_per_class, channels, image_size, fce, network_name)
 
+# 
 total_epochs = 300
 total_train_batches = 1000
 total_val_batches = 100
@@ -55,13 +62,12 @@ with tf.Session() as sess:
     sess.run(init)
     saver = tf.train.Saver()
     if continue_from_epoch != -1: #load checkpoint if needed
-        checkpoint = "saved_models/{}_{}.ckpt".format(experiment_name, continue_from_epoch)
+        checkpoint = "{}_{}.ckpt".format(experiment_name, continue_from_epoch)
         variables_to_restore = []
-        print("restoring variables...")
-        for var in tf.get_collection(tf.GraphKeys.VARIABLES):
-            print(var.name)
+        for var in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES):
+            print(var)
             variables_to_restore.append(var)
-        # 
+
         tf.logging.info('Fine-tuning from %s' % checkpoint)
 
         fine_tune = slim.assign_from_checkpoint_fn(
@@ -71,8 +77,6 @@ with tf.Session() as sess:
         fine_tune(sess)
 
     best_val = 0.
-    # with tqdm.tqdm(total=total_epochs) as pbar_e:
-    #     for e in range(0, total_epochs):
     with tqdm.tqdm(total=epochs) as pbar_e:
         for e in range(0, epochs):
             total_c_loss, total_accuracy = experiment.run_training_epoch(total_train_batches=total_train_batches,
@@ -97,5 +101,5 @@ with tf.Session() as sess:
                             [e, total_c_loss, total_accuracy, total_val_c_loss, total_val_accuracy, total_test_c_loss,
                              total_test_accuracy])
 
-            save_path = saver.save(sess, "saved_models/{}_{}.ckpt".format(experiment_name, e))
+            save_path = saver.save(sess, "{}_{}.ckpt".format(experiment_name, e))
             pbar_e.update(1)
