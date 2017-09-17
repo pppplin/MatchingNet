@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.python.ops.nn_ops import max_pool
-from tensorflow.python.ops import rnn_cell, rnn
+from tensorflow.python.ops import rnn_cell
 
 class BidirectionalLSTM:
     """
@@ -28,7 +28,7 @@ class BidirectionalLSTM:
         from future import static_bidirectional_rnn
         with tf.name_scope('bid-lstm' + name), tf.variable_scope('bid-lstm'):
             if self.reuse:
-                tf.get_variable_scope().reuse_variables()   
+                tf.get_variable_scope().reuse_variables()
 
             fw_lstm_cell = rnn_cell.LSTMCell(num_units=self.layer_sizes, activation=tf.nn.tanh)
             bw_lstm_cell = rnn_cell.LSTMCell(num_units=self.layer_sizes, activation=tf.nn.tanh)
@@ -77,7 +77,7 @@ class DistanceNetwork:
                     euc_similarity = tf.reduce_sum(tf.square(support_image-input_image), 1, keep_dims = True)
                     similarities.append(-euc_similarity)
                 else:
-                    print("Unsupported distance type.") 
+                    print("Unsupported distance type.")
                     assert False
 
         similarities = tf.concat(concat_dim=1, values=similarities)
@@ -112,19 +112,20 @@ class AttentionalClassify:
 class ClassEmbedClassify:
     """Class Embeddings"""
     def __init__(self):
-        self.reuse = False        
+        self.reuse = False
     def __call__(self, similarities):
-        with tf.name_scope('classembed-classification' + name), tf.variable_scope('classembed-classification'):
+        with tf.name_scope('classembed-classification'), tf.variable_scope('classembed-classification'):
             if self.reuse:
                 tf.variable_scope().reuse_variables()
         self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='attentional-classification')
+        preds = None
         return preds
 
 
 class OneshotNetwork:
     def __init__(self, support_set_images, support_set_labels, target_image, target_label, keep_prob,
-                 batch_size=100, num_channels=1, is_training=False, learning_rate=0.001, rotate_flag=False, fce=False, num_classes_per_set=5,
-                 num_samples_per_class=1, network_name = "MN"):
+                 batch_size=100, num_channels=1, train_time=True, is_training=False, learning_rate=0.001, rotate_flag=False, fce=False, classes_train = 2, classes_test = 5,
+                 num_samples_per_class=1, num_queries_per_class = 1,  network_name = "MN"):
 
         """
         Builds a matching network, the training and evaluation ops as well as data augmentation routines.
@@ -141,21 +142,31 @@ class OneshotNetwork:
         :param num_classes_per_set: Integer indicating the number of classes per set
         :param num_samples_per_class: Integer indicating the number of samples per class
         """
+        self.train_time = train_time
         self.batch_size = batch_size
         self.fce = fce
+
+        self.classes_train = classes_train
+        self.classes_test = classes_test
+        self.num_samples_per_class = num_samples_per_class
+        self.num_queries_per_class = num_queries_per_class
+
+
         self.g = Classifier(self.batch_size, num_channels=num_channels, layer_sizes=[64, 64, 64 ,64])
         if fce:
             self.lstm = BidirectionalLSTM(layer_sizes=[32], batch_size=self.batch_size)
         self.dn = DistanceNetwork()
+
         self.support_set_images = support_set_images
         self.support_set_labels = support_set_labels
         self.target_image = target_image
         self.target_label = target_label
+
         self.keep_prob = keep_prob
         self.is_training = is_training
         self.k = None
         self.rotate_flag = rotate_flag
-        self.num_classes_per_set = num_classes_per_set
+
         self.num_samples_per_class = num_samples_per_class
         self.learning_rate = learning_rate
         self.network_name = network_name
@@ -174,20 +185,47 @@ class OneshotNetwork:
         Builds tf graph for Matching Networks, produces losses and summary statistics.
         :return:
         """
+
         with tf.name_scope("losses"):
-            self.support_set_labels = tf.one_hot(self.support_set_labels, self.num_classes_per_set)  # one hot encode
+            def fn2():
+                self.n_samples = self.classes_test*self.num_samples_per_class
+                self.n_queries = self.classes_test*self.num_queries_per_class
+                return tf.constant(1)
+
+            def fn1():
+                self.n_samples = self.classes_train*self.num_samples_per_class
+                self.n_queries = self.classes_train*self.num_queries_per_class
+                return tf.constant(0)
+
+            _ = tf.cond(self.train_time, fn1, fn2)
+
+            shape_ls = self.support_set_images.get_shape().as_list()
+
+            support_set_images = self.support_set_images
+            support_set_images.set_shape((shape_ls[0], self.n_samples, shape_ls[2], shape_ls[3], shape_ls[4]))
+            target_image = self.target_image
+            target_image.set_shape((shape_ls[0], self.n_queries, shape_ls[2], shape_ls[3], shape_ls[4]))
+            """
+            self.support_set_images.set_shape((shape_ls[0], self.n_samples, shape_ls[2], shape_ls[3], shape_ls[4]))
+            self.support_set_labels.set_shape((shape_ls[0], self.n_samples))
+            self.target_image.set_shape((shape_ls[0], self.n_queries, shape_ls[2], shape_ls[3], shape_ls[4]))
+            self.target_label.set_shape((shape_ls[0], self.n_queries))
+            """
+            nclasses = self.n_samples/self.num_samples_per_class
+            self.support_set_labels = tf.one_hot(self.support_set_labels, nclasses)  # one hot encode
+
             encoded_images = []
-            for image in tf.unpack(self.support_set_images, axis=1):  #produce embeddings for support set images
+            for image in tf.unpack(support_set_images, axis=1):  #produce embeddings for support set images
                 gen_encode = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
                 encoded_images.append(gen_encode)
             encoded_images = tf.pack(encoded_images, axis = 1)
             preds = []
 
             if self.network_name == "MN":
-                for image in tf.unpack(self.target_image, axis=1):  #produce embeddings for support set images
+                for image in tf.unpack(target_image, axis=1):  #produce embeddings for support set images
                     single_target = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
                     similarities = self.dn(support_set=encoded_images, input_image=single_target, name="cosine",
-                                           training=self.is_training)  
+                                           training=self.is_training)
                     single_pred = self.classify(similarities, support_set_y=self.support_set_labels, name='classify', training=self.is_training)
                     preds.append(single_pred)
 
@@ -197,9 +235,9 @@ class OneshotNetwork:
                 class_embedding = tf.reduce_sum(tf.batch_matmul(support_image, support_set_labels), 1) #[bs, sl, 64, nc]
                 class_embedding = class_embedding/self.num_samples_per_class
                 class_embedding = tf.transpose(tf.squeeze(class_embedding), perm = [0, 2, 1]) #[bs, nc, 64]
-                for image in tf.unpack(self.target_image, axis=1):  #produce embeddings for support set images
+                for image in tf.unpack(target_image, axis=1):  #produce embeddings for support set images
                     single_target = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
-                    single_pred = self.dn(support_set=class_embedding, input_image=single_target, name="euclidean", training=self.is_training)  
+                    single_pred = self.dn(support_set=class_embedding, input_image=single_target, name="euclidean", training=self.is_training)
                     preds.append(single_pred)
 
             else:
@@ -213,6 +251,14 @@ class OneshotNetwork:
                                                                                               logits=preds))
             tf.add_to_collection('crossentropy_losses', crossentropy_loss)
             tf.add_to_collection('accuracy', accuracy)
+
+            shape_ls = self.support_set_images.get_shape().as_list()
+            """
+            self.support_set_images = tf.placeholder(tf.float32, [shape_ls[0], None, shape_ls[2], shape_ls[3], shape_ls[4]])
+            self.support_set_labels = tf.placeholder(tf.int32, [shape_ls[0], None, None])
+            self.target_image = tf.placeholder(tf.float32, [shape_ls[0], None, shape_ls[2], shape_ls[3], shape_ls[4]])
+            self.target_label = tf.placeholder(tf.int32, [shape_ls[0], None])
+            """
 
         return {
             self.classify: tf.add_n(tf.get_collection('crossentropy_losses'), name='total_classification_loss'),
@@ -320,7 +366,8 @@ class Classifier:
             g_conv_encoder = g_conv4_encoder
             g_conv_encoder = tf.contrib.layers.flatten(g_conv_encoder)
 
-        # 
+        #
         self.reuse = True
         self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='g')
         return g_conv_encoder
+

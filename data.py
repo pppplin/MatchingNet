@@ -1,5 +1,11 @@
 import numpy as np
 
+def unpickle(file):
+    import pickle
+    with open(file, 'rb') as fo:
+        dict = pickle.load(fo)
+    return dict
+
 class OmniglotNShotDataset():
     def __init__(self, batch_size, classes_per_set=10, samples_per_class=1, seed=2591, queries_per_class=1):
 
@@ -103,7 +109,7 @@ class OmniglotNShotDataset():
             x_support_set = np.array(x_augmented_support_set)
             # x_target = np.array(x_augmented_target_set)
 
-        # reshape and shuffle
+        "reshape and shuffle"
         n_samples = self.samples_per_class*self.classes_per_set
         n_queries = self.queries_per_class*self.classes_per_set
 
@@ -153,8 +159,10 @@ class OmniglotNShotDataset():
 
 
 class CIFAR_100():
-    def __init__(self, batch_size, classes_per_set=10, samples_per_class=1, seed=2591, queries_per_class=1):
-
+    def __init__(self, batch_size, samples_per_class=1, seed=2591, queries_per_class=1):
+        """
+        classes_per_set unused.
+        """
         """
         Constructs an N-Shot omniglot Dataset
         :param batch_size: Experiment batch_size
@@ -164,8 +172,8 @@ class CIFAR_100():
              For a 5-way, 10-shot learning task, use classes_per_set=5 and samples_per_class=10
         """
         np.random.seed(seed)
-        train_dict = self.unpickle('/home/weilin/OneShot/CIFAR_100/train')
-        test_dict = self.unpickle('/home/weilin/OneShot/CIFAR_100/test')
+        train_dict = unpickle('/home/weilin/OneShot/CIFAR_100/train')
+        test_dict = unpickle('/home/weilin/OneShot/CIFAR_100/test')
         X_train = train_dict[b'data']
         X_test = test_dict[b'data']
         y_train = train_dict[b'fine_labels']
@@ -182,7 +190,6 @@ class CIFAR_100():
         # self.normalization()
         self.batch_size = batch_size
         self.n_classes = self.x.shape[0]
-        self.classes_per_set = classes_per_set
         self.samples_per_class = samples_per_class
         self.queries_per_class = queries_per_class
 
@@ -206,12 +213,6 @@ class CIFAR_100():
 
         print("after_normalization", "mean", np.mean(self.x_train), "max", np.max(self.x_train), "min", np.min(self.x_train), "std", np.std(self.x_train))
 
-    def unpickle(self, file):
-        import pickle
-        with open(file, 'rb') as fo:
-            dict = pickle.load(fo)
-        return dict
-
     def get_indexed_data(self, X, y, n):
         X_new = []
         y_new = []
@@ -225,25 +226,25 @@ class CIFAR_100():
         y_new = np.asarray(y_new)
         return X_new, y_new
 
-        
-    def get_new_batch(self, data_pack):
+
+    def get_new_batch(self, data_pack, n_classes):
         """
         Collects 1000 batches data for N-shot learning
         :param data_pack: Data pack to use (any one of train, val, test)
         :return: A list with [support_set_x, support_set_y, target_x, target_y] ready to be fed to our networks
         """
-        support_set_x = np.zeros((self.batch_size, self.classes_per_set, self.samples_per_class, data_pack.shape[2],
+        support_set_x = np.zeros((self.batch_size, n_classes, self.samples_per_class, data_pack.shape[2],
                                   data_pack.shape[3], data_pack.shape[4]), dtype=np.float32)
-        support_set_y = np.zeros((self.batch_size, self.classes_per_set, self.samples_per_class), dtype=np.float32)
-        target_x = np.zeros((self.batch_size, self.classes_per_set, self.queries_per_class, data_pack.shape[2], data_pack.shape[3], data_pack.shape[4]),
+        support_set_y = np.zeros((self.batch_size, n_classes, self.samples_per_class), dtype=np.float32)
+        target_x = np.zeros((self.batch_size, n_classes, self.queries_per_class, data_pack.shape[2], data_pack.shape[3], data_pack.shape[4]),
                             dtype=np.float32)
-        target_y = np.zeros((self.batch_size, self.classes_per_set, self.queries_per_class), dtype=np.float32)
+        target_y = np.zeros((self.batch_size, n_classes, self.queries_per_class), dtype=np.float32)
 
         for i in range(self.batch_size):
             classes_idx = np.arange(data_pack.shape[0])
             samples_idx = np.arange(data_pack.shape[1])
-            choose_classes = np.random.choice(classes_idx, size=self.classes_per_set, replace=False)
-            choose_label = np.random.choice(self.classes_per_set, size=1)
+            choose_classes = np.random.choice(classes_idx, size=n_classes, replace=False)
+            choose_label = np.random.choice(n_classes, size=1)
 
             choose_samples = np.random.choice(samples_idx, size=self.samples_per_class+self.queries_per_class, replace=False)
 
@@ -251,7 +252,7 @@ class CIFAR_100():
             x_support = x_chosen[:, choose_samples[:self.samples_per_class]]
             x_target = x_chosen[:, choose_samples[self.samples_per_class:]]
 
-            y_temp = np.arange(self.classes_per_set).reshape(self.classes_per_set, 1)
+            y_temp = np.arange(n_classes).reshape(n_classes, 1)
 
             support_set_x[i] = x_support
             support_set_y[i] = np.dot(y_temp, np.ones((1,self.samples_per_class)))
@@ -260,21 +261,23 @@ class CIFAR_100():
 
         return support_set_x, support_set_y, target_x, target_y
 
-    def get_batch(self, dataset_name, augment=False):
+    def get_batch(self, dataset_name, n_classes,  augment=False):
         """
         Gets next batch from the dataset with name.
         :param dataset_name: The name of the dataset (one of "train", "val", "test")
         :return:
         """
-        x_support_set, y_support_set, x_target, y_target = self.get_new_batch(self.datasets[dataset_name])
+        x_support_set, y_support_set, x_target, y_target = self.get_new_batch(self.datasets[dataset_name], n_classes)
         if augment:
-            k = np.random.randint(0, 4, size=(self.batch_size, self.classes_per_set))
+            "k = np.random.randint(0, 4, size=(self.batch_size, n_classes))"
+            k = np.random.randint(0, 4, size=(self.batch_size, n_classes))
+            x_augmented_support_set = []
             x_augmented_support_set = []
             # x_augmented_target_set = []
             for b in range(self.batch_size):
                 temp_class_support = []
 
-                for c in range(self.classes_per_set):
+                for c in range(n_classes):
                     x_temp_support_set = self.rotate_batch(x_support_set[b, c], axis=(1, 2), k=k[b, c])
                     # if y_target[b] == y_support_set[b, c, 0]:
                         # x_temp_target = self.rotate_batch(x_target[b], axis=(0, 1), k=k[b, c])
@@ -287,8 +290,8 @@ class CIFAR_100():
             # x_target = np.array(x_augmented_target_set)
 
         # reshape and shuffle
-        n_samples = self.samples_per_class*self.classes_per_set
-        n_queries = self.queries_per_class*self.classes_per_set
+        n_samples = self.samples_per_class*n_classes
+        n_queries = self.queries_per_class*n_classes
 
         x_shape = x_support_set.shape[-3:]
         x_support_set = np.reshape(x_support_set, (self.batch_size, n_samples, x_shape[0], x_shape[1], x_shape[2]))
@@ -310,28 +313,30 @@ class CIFAR_100():
         # x_batch = rotate(x_batch, k*90, reshape=False, axes=axis, mode="nearest")
         return x_batch
 
-    def get_train_batch(self, augment=False):
+    def get_train_batch(self, n_classes, augment=False):
 
         """
         Get next training batch
         :return: Next training batch
         """
-        return self.get_batch("train", augment)
+        return self.get_batch("train", n_classes, augment)
 
-    def get_test_batch(self, augment=False):
+    def get_test_batch(self, n_classes, augment=False):
 
         """
         Get next test batch
         :return: Next test_batch
         """
-        return self.get_batch("test", augment)
+        return self.get_batch("test", n_classes, augment)
 
-    def get_val_batch(self, augment=False):
+
+    def get_val_batch(self, n_classes, augment=False):
 
         """
         Get next val batch
         :return: Next val batch
         """
-        return self.get_batch("val", augment)
+        return self.get_batch("val", n_classes, augment)
+
 
 

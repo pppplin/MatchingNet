@@ -1,7 +1,7 @@
 import tensorflow as tf
 import tqdm
 from one_shot_learning_network import OneshotNetwork
-import numpy as np
+
 
 class ExperimentBuilder:
 
@@ -14,9 +14,10 @@ class ExperimentBuilder:
         """
         self.data = data
 
-    def build_experiment(self, batch_size, classes_per_set, samples_per_class, queries_per_class, channels, image_size, fce, network_name):
-        """
+    "def build_experiment(self, batch_size, classes_per_set, samples_per_class, queries_per_class, channels, image_size, fce, network_name):"
 
+    def build_experiment(self, batch_size, classes_train, classes_test, samples_per_class, queries_per_class, channels, image_size, fce, network_name):
+        """
         :param batch_size: The experiment batch size
         :param classes_per_set: An integer indicating the number of classes per support set
         :param samples_per_class: An integer indicating the number of samples per class
@@ -24,25 +25,29 @@ class ExperimentBuilder:
         :param fce: Whether to use full context embeddings or not
         :return: a matching_network object, along with the losses, the training ops and the init op
         """
+        """
         n_samples = classes_per_set * samples_per_class
         n_queries = classes_per_set * queries_per_class
-        self.support_set_images = tf.placeholder(tf.float32, [batch_size, n_samples, image_size, image_size, channels],
-                                            'support_set_images')
-        self.support_set_labels = tf.placeholder(tf.int32, [batch_size, n_samples], 'support_set_labels')
-        self.target_image = tf.placeholder(tf.float32, [batch_size, n_queries, image_size, image_size, channels], 'target_image')
-        self.target_label = tf.placeholder(tf.int32, [batch_size, n_queries], 'target_label')
+        """
+        self.classes_train = classes_train
+        self.classes_test = classes_test
+        self.support_set_images = tf.placeholder(tf.float32, [batch_size, None, image_size, image_size, channels],'support_set_images')
+        self.support_set_labels = tf.placeholder(tf.int32, [batch_size, None], 'support_set_labels')
+        self.target_image = tf.placeholder(tf.float32, [batch_size, None, image_size, image_size, channels], 'target_image')
+        self.target_label = tf.placeholder(tf.int32, [batch_size, None], 'target_label')
+
+        self.train_time = tf.placeholder(tf.bool, name='flag-for-classes')
         self.training_phase = tf.placeholder(tf.bool, name='training-flag')
         self.rotate_flag = tf.placeholder(tf.bool, name='rotate-flag')
         self.keep_prob = tf.placeholder(tf.float32, name='dropout-prob')
         self.current_learning_rate = 1e-03
         self.learning_rate = tf.placeholder(tf.float32, name='learning-rate-set')
+        """uncertain num of classes"""
         self.one_shot = OneshotNetwork(batch_size=batch_size, support_set_images=self.support_set_images,
                                             support_set_labels=self.support_set_labels,
                                             target_image=self.target_image, target_label=self.target_label,
-                                            keep_prob=self.keep_prob, num_channels=channels,
-                                            is_training=self.training_phase, fce=fce, rotate_flag=self.rotate_flag,
-                                            num_classes_per_set=classes_per_set,
-                                            num_samples_per_class=samples_per_class, learning_rate=self.learning_rate, network_name = network_name)
+                                            keep_prob=self.keep_prob, num_channels=channels, train_time = self.train_time, is_training=self.training_phase, fce=fce, rotate_flag=self.rotate_flag,
+                                            classes_train=classes_train, classes_test = classes_test, num_samples_per_class=samples_per_class, num_queries_per_class = queries_per_class, learning_rate=self.learning_rate, network_name = network_name)
 
         summary, self.losses, self.c_error_opt_op = self.one_shot.init_train()
         init = tf.initialize_all_variables()
@@ -60,14 +65,13 @@ class ExperimentBuilder:
         total_c_loss = 0.
         total_accuracy = 0.
         with tqdm.tqdm(total=total_train_batches) as pbar:
-
-            for i in range(total_train_batches):  # train epoch
-                x_support_set, y_support_set, x_target, y_target = self.data.get_train_batch(augment=True)
+            for i in range(total_train_batches):
+                x_support_set, y_support_set, x_target, y_target = self.data.get_train_batch(augment=True, n_classes = self.classes_train)
                 _, c_loss_value, acc = sess.run(
                     [self.c_error_opt_op, self.losses[self.one_shot.classify], self.losses[self.one_shot.dn]],
                     feed_dict={self.keep_prob: 1.0, self.support_set_images: x_support_set,
                                self.support_set_labels: y_support_set, self.target_image: x_target, self.target_label: y_target,
-                               self.training_phase: True, self.rotate_flag: False, self.learning_rate: self.current_learning_rate})
+                               self.train_time: True, self.training_phase: True, self.rotate_flag: False, self.learning_rate: self.current_learning_rate})
 
                 iter_out = "train_loss: {}, train_accuracy: {}".format(c_loss_value, acc)
                 pbar.set_description(iter_out)
@@ -96,13 +100,13 @@ class ExperimentBuilder:
 
         with tqdm.tqdm(total=total_val_batches) as pbar:
             for i in range(total_val_batches):  # validation epoch
-                x_support_set, y_support_set, x_target, y_target = self.data.get_val_batch(augment=True)
+                x_support_set, y_support_set, x_target, y_target = self.data.get_val_batch(augment=True, n_classes = self.classes_test)
 
                 c_loss_value, acc = sess.run(
                     [self.losses[self.one_shot.classify], self.losses[self.one_shot.dn]],
                     feed_dict={self.keep_prob: 1.0, self.support_set_images: x_support_set,
                                self.support_set_labels: y_support_set, self.target_image: x_target, self.target_label: y_target,
-                               self.training_phase: False, self.rotate_flag: False})
+                               self.train_time: False, self.training_phase: False, self.rotate_flag: False})
 
                 iter_out = "val_loss: {}, val_accuracy: {}".format(c_loss_value, acc)
                 pbar.set_description(iter_out)
@@ -127,14 +131,12 @@ class ExperimentBuilder:
         total_test_accuracy = 0.
         with tqdm.tqdm(total=total_test_batches) as pbar:
             for i in range(total_test_batches):
-                x_support_set, y_support_set, x_target, y_target = self.data.get_test_batch(augment=True)
-                # x_support_set = np.squeeze(x_support_set, axis = 2)
-                # y_support_set = np.squeeze(y_support_set, axis=2)
+                x_support_set, y_support_set, x_target, y_target = self.data.get_test_batch(augment=True, n_classes = self.classes_test)
                 c_loss_value, acc = sess.run(
                     [self.losses[self.one_shot.classify], self.losses[self.one_shot.dn]],
                     feed_dict={self.keep_prob: 1.0, self.support_set_images: x_support_set,
                                self.support_set_labels: y_support_set, self.target_image: x_target,
-                               self.target_label: y_target,
+                               self.target_label: y_target,self.train_time: False,
                                self.training_phase: False, self.rotate_flag: False})
 
                 iter_out = "test_loss: {}, test_accuracy: {}".format(c_loss_value, acc)
@@ -146,3 +148,5 @@ class ExperimentBuilder:
             total_test_c_loss = total_test_c_loss / total_test_batches
             total_test_accuracy = total_test_accuracy / total_test_batches
         return total_test_c_loss, total_test_accuracy
+
+
