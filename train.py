@@ -25,7 +25,7 @@ epochs = 30
 logs_path = "outputs/"
 
 fce = False
-experiment_name = logs_path + "{}_{}_{}_{}".format(network_name, data_name, samples_per_class, classes_per_set)
+experiment_name = logs_path + "{}_{}_{}".format("BI", classes_train, classes_test)
 
 if data_name == "cifar":
     channels = 3

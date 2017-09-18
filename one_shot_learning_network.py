@@ -187,42 +187,38 @@ class OneshotNetwork:
         """
 
         with tf.name_scope("losses"):
+            self.flag = 0
             def fn2():
+                self.flag += 1
                 self.n_samples = self.classes_test*self.num_samples_per_class
                 self.n_queries = self.classes_test*self.num_queries_per_class
                 return tf.constant(1)
 
             def fn1():
+                self.flag += 1
                 self.n_samples = self.classes_train*self.num_samples_per_class
                 self.n_queries = self.classes_train*self.num_queries_per_class
                 return tf.constant(0)
-
             _ = tf.cond(self.train_time, fn1, fn2)
 
-            shape_ls = self.support_set_images.get_shape().as_list()
+            if self.flag>1:
+                self.n_samples = self.classes_train*self.num_samples_per_class
+                self.n_queries = self.classes_train*self.num_queries_per_class
 
-            support_set_images = self.support_set_images
-            support_set_images.set_shape((shape_ls[0], self.n_samples, shape_ls[2], shape_ls[3], shape_ls[4]))
-            target_image = self.target_image
-            target_image.set_shape((shape_ls[0], self.n_queries, shape_ls[2], shape_ls[3], shape_ls[4]))
-            """
-            self.support_set_images.set_shape((shape_ls[0], self.n_samples, shape_ls[2], shape_ls[3], shape_ls[4]))
-            self.support_set_labels.set_shape((shape_ls[0], self.n_samples))
-            self.target_image.set_shape((shape_ls[0], self.n_queries, shape_ls[2], shape_ls[3], shape_ls[4]))
-            self.target_label.set_shape((shape_ls[0], self.n_queries))
-            """
             nclasses = self.n_samples/self.num_samples_per_class
-            self.support_set_labels = tf.one_hot(self.support_set_labels, nclasses)  # one hot encode
+            support_set_labels = tf.one_hot(self.support_set_labels, nclasses)  # one hot encode
+            support_set_labels = tf.slice(support_set_labels, [0,0,0], [-1, self.n_samples, -1])
 
             encoded_images = []
-            for image in tf.unpack(support_set_images, axis=1):  #produce embeddings for support set images
+            for image in tf.unpack(self.support_set_images, axis=1)[:self.n_samples]:
+                #produce embeddings for support set images
                 gen_encode = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
                 encoded_images.append(gen_encode)
             encoded_images = tf.pack(encoded_images, axis = 1)
             preds = []
 
             if self.network_name == "MN":
-                for image in tf.unpack(target_image, axis=1):  #produce embeddings for support set images
+                for image in tf.unpack(self.target_image, axis=1):  #produce embeddings for support set images
                     single_target = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
                     similarities = self.dn(support_set=encoded_images, input_image=single_target, name="cosine",
                                            training=self.is_training)
@@ -231,11 +227,12 @@ class OneshotNetwork:
 
             elif self.network_name == "PN":
                 support_image = tf.expand_dims(encoded_images, 3) #[bs, sl, 64,1]
-                support_set_labels = tf.expand_dims(self.support_set_labels, 2) #[bs, sl, 1, nc]
+                support_set_labels = tf.expand_dims(support_set_labels, 2) #[bs, sl, 1, nc]
+
                 class_embedding = tf.reduce_sum(tf.batch_matmul(support_image, support_set_labels), 1) #[bs, sl, 64, nc]
                 class_embedding = class_embedding/self.num_samples_per_class
                 class_embedding = tf.transpose(tf.squeeze(class_embedding), perm = [0, 2, 1]) #[bs, nc, 64]
-                for image in tf.unpack(target_image, axis=1):  #produce embeddings for support set images
+                for image in tf.unpack(self.target_image, axis=1)[:nclasses]:  #produce embeddings for support set images
                     single_target = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
                     single_pred = self.dn(support_set=class_embedding, input_image=single_target, name="euclidean", training=self.is_training)
                     preds.append(single_pred)
@@ -244,21 +241,14 @@ class OneshotNetwork:
                 print("Network Unsupported.")
                 assert False
 
+            target_label = tf.slice(self.target_label, [0,0], [-1, nclasses])
             preds = tf.pack(preds, axis = 1)
-            correct_prediction = tf.equal(tf.argmax(preds, 2), tf.cast(self.target_label, tf.int64))
+            correct_prediction = tf.equal(tf.argmax(preds, 2), tf.cast(target_label, tf.int64))
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-            crossentropy_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.target_label,
+            crossentropy_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_label,
                                                                                               logits=preds))
             tf.add_to_collection('crossentropy_losses', crossentropy_loss)
             tf.add_to_collection('accuracy', accuracy)
-
-            shape_ls = self.support_set_images.get_shape().as_list()
-            """
-            self.support_set_images = tf.placeholder(tf.float32, [shape_ls[0], None, shape_ls[2], shape_ls[3], shape_ls[4]])
-            self.support_set_labels = tf.placeholder(tf.int32, [shape_ls[0], None, None])
-            self.target_image = tf.placeholder(tf.float32, [shape_ls[0], None, shape_ls[2], shape_ls[3], shape_ls[4]])
-            self.target_label = tf.placeholder(tf.int32, [shape_ls[0], None])
-            """
 
         return {
             self.classify: tf.add_n(tf.get_collection('crossentropy_losses'), name='total_classification_loss'),

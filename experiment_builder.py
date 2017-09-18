@@ -1,5 +1,6 @@
 import tensorflow as tf
 import tqdm
+import numpy as np
 from one_shot_learning_network import OneshotNetwork
 
 
@@ -29,12 +30,19 @@ class ExperimentBuilder:
         n_samples = classes_per_set * samples_per_class
         n_queries = classes_per_set * queries_per_class
         """
+        self.batch_size = batch_size
+        self.image_size = image_size
+        self.channels = channels
+        self.samples_per_class = samples_per_class
+        self.queries_per_class = queries_per_class
         self.classes_train = classes_train
         self.classes_test = classes_test
-        self.support_set_images = tf.placeholder(tf.float32, [batch_size, None, image_size, image_size, channels],'support_set_images')
-        self.support_set_labels = tf.placeholder(tf.int32, [batch_size, None], 'support_set_labels')
-        self.target_image = tf.placeholder(tf.float32, [batch_size, None, image_size, image_size, channels], 'target_image')
-        self.target_label = tf.placeholder(tf.int32, [batch_size, None], 'target_label')
+        self.classes_num = max(classes_train, classes_test)
+
+        self.support_set_images = tf.placeholder(tf.float32, [batch_size, self.classes_num*samples_per_class, image_size, image_size, channels],'support_set_images')
+        self.support_set_labels = tf.placeholder(tf.int32, [batch_size, self.classes_num*samples_per_class], 'support_set_labels')
+        self.target_image = tf.placeholder(tf.float32, [batch_size, self.classes_num*queries_per_class, image_size, image_size, channels], 'target_image')
+        self.target_label = tf.placeholder(tf.int32, [batch_size, self.classes_num*queries_per_class], 'target_label')
 
         self.train_time = tf.placeholder(tf.bool, name='flag-for-classes')
         self.training_phase = tf.placeholder(tf.bool, name='training-flag')
@@ -67,6 +75,18 @@ class ExperimentBuilder:
         with tqdm.tqdm(total=total_train_batches) as pbar:
             for i in range(total_train_batches):
                 x_support_set, y_support_set, x_target, y_target = self.data.get_train_batch(augment=True, n_classes = self.classes_train)
+                if self.classes_num!=self.classes_train:
+                    """pad to classes_num"""
+                    pad1 = np.zeros((self.batch_size, (self.classes_num - self.classes_train)*self.samples_per_class, self.image_size, self.image_size, self.channels))
+                    pad2 = np.zeros((self.batch_size, (self.classes_num - self.classes_train)*self.samples_per_class))
+                    pad3 = np.zeros((self.batch_size, (self.classes_num - self.classes_train)*self.queries_per_class, self.image_size,self.image_size, self.channels))
+                    pad4 = np.zeros((self.batch_size, (self.classes_num - self.classes_train)*self.queries_per_class))
+
+                    x_support_set = np.concatenate((x_support_set, pad1), axis = 1)
+                    y_support_set = np.concatenate((y_support_set, pad2), axis = 1)
+                    x_target = np.concatenate((x_target, pad3), axis = 1)
+                    y_target = np.concatenate((y_target, pad4), axis = 1)
+
                 _, c_loss_value, acc = sess.run(
                     [self.c_error_opt_op, self.losses[self.one_shot.classify], self.losses[self.one_shot.dn]],
                     feed_dict={self.keep_prob: 1.0, self.support_set_images: x_support_set,
@@ -101,6 +121,16 @@ class ExperimentBuilder:
         with tqdm.tqdm(total=total_val_batches) as pbar:
             for i in range(total_val_batches):  # validation epoch
                 x_support_set, y_support_set, x_target, y_target = self.data.get_val_batch(augment=True, n_classes = self.classes_test)
+                if self.classes_num!=self.classes_test:
+                    pad1 = np.zeros((self.batch_size, (self.classes_num - self.classes_test)*self.samples_per_class, self.image_size, self.image_size, self.channels))
+                    pad2 = np.zeros((self.batch_size, (self.classes_num - self.classes_test)*self.samples_per_class))
+                    pad3 = np.zeros((self.batch_size, (self.classes_num - self.classes_test)*self.queries_per_class, self.image_size,self.image_size, self.channels))
+                    pad4 = np.zeros((self.batch_size, (self.classes_num - self.classes_test)*self.queries_per_class))
+
+                    x_support_set = np.concatenate((x_support_set, pad1), axis = 1)
+                    y_support_set = np.concatenate((y_support_set, pad2), axis = 1)
+                    x_target = np.concatenate((x_target, pad3), axis = 1)
+                    y_target = np.concatenate((y_target, pad4), axis = 1)
 
                 c_loss_value, acc = sess.run(
                     [self.losses[self.one_shot.classify], self.losses[self.one_shot.dn]],
@@ -132,6 +162,17 @@ class ExperimentBuilder:
         with tqdm.tqdm(total=total_test_batches) as pbar:
             for i in range(total_test_batches):
                 x_support_set, y_support_set, x_target, y_target = self.data.get_test_batch(augment=True, n_classes = self.classes_test)
+                if self.classes_num!=self.classes_test:
+                    pad1 = np.zeros((self.batch_size, (self.classes_num - self.classes_test)*self.samples_per_class, self.image_size, self.image_size, self.channels))
+                    pad2 = np.zeros((self.batch_size, (self.classes_num - self.classes_test)*self.samples_per_class))
+                    pad3 = np.zeros((self.batch_size, (self.classes_num - self.classes_test)*self.queries_per_class, self.image_size,self.image_size, self.channels))
+                    pad4 = np.zeros((self.batch_size, (self.classes_num - self.classes_test)*self.queries_per_class))
+
+                    x_support_set = np.concatenate((x_support_set, pad1), axis = 1)
+                    y_support_set = np.concatenate((y_support_set, pad2), axis = 1)
+                    x_target = np.concatenate((x_target, pad3), axis = 1)
+                    y_target = np.concatenate((y_target, pad4), axis = 1)
+
                 c_loss_value, acc = sess.run(
                     [self.losses[self.one_shot.classify], self.losses[self.one_shot.dn]],
                     feed_dict={self.keep_prob: 1.0, self.support_set_images: x_support_set,
