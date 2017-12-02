@@ -64,12 +64,12 @@ class DistanceNetwork:
             if self.reuse:
                 tf.variable_scope().reuse_variables()
             similarities = []
-            for support_image in tf.unpack(support_set, axis=1):
+            for support_image in tf.unstack(support_set, axis=1):
                 if name == "cosine":
                     eps = 1e-10
                     sum_support = tf.reduce_sum(tf.square(support_image), 1, keep_dims=True)
                     support_magnitude = tf.rsqrt(tf.clip_by_value(sum_support, eps, float("inf")))
-                    dot_product = tf.batch_matmul(tf.expand_dims(input_image, 1), tf.expand_dims(support_image, 2))
+                    dot_product = tf.matmul(tf.expand_dims(input_image, 1), tf.expand_dims(support_image, 2))
                     dot_product = tf.squeeze(dot_product, [1, ])
                     cosine_similarity = dot_product * support_magnitude
                     similarities.append(cosine_similarity)
@@ -80,7 +80,7 @@ class DistanceNetwork:
                     print("Unsupported distance type.")
                     assert False
 
-        similarities = tf.concat(concat_dim=1, values=similarities)
+        similarities = tf.concat(axis=1, values=similarities)
         self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='distance-module')
 
         return similarities
@@ -104,7 +104,7 @@ class AttentionalClassify:
             if self.reuse:
                 tf.variable_scope().reuse_variables()
             softmax_similarities = tf.nn.softmax(similarities)
-            preds = tf.squeeze(tf.batch_matmul(tf.expand_dims(softmax_similarities, 1), support_set_y))
+            preds = tf.squeeze(tf.matmul(tf.expand_dims(softmax_similarities, 1), support_set_y))
 
         self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='attentional-classification')
         return preds
@@ -126,7 +126,6 @@ class OneshotNetwork:
     def __init__(self, support_set_images, support_set_labels, target_image, target_label, keep_prob,
                  batch_size=100, num_channels=1, train_time=True, is_training=False, learning_rate=0.001, rotate_flag=False, fce=False, classes_train = 2, classes_test = 5,
                  num_samples_per_class=1, num_queries_per_class = 1,  network_name = "MN"):
-
         """
         Builds a matching network, the training and evaluation ops as well as data augmentation routines.
         :param support_set_images: A tensor containing the support set images [batch_size, n_samples, 28, 28, 1]
@@ -210,15 +209,15 @@ class OneshotNetwork:
             support_set_labels = tf.slice(support_set_labels, [0,0,0], [-1, self.n_samples, -1])
 
             encoded_images = []
-            for image in tf.unpack(self.support_set_images, axis=1)[:self.n_samples]:
+            for image in tf.unstack(self.support_set_images, axis=1)[:self.n_samples]:
                 #produce embeddings for support set images
                 gen_encode = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
                 encoded_images.append(gen_encode)
-            encoded_images = tf.pack(encoded_images, axis = 1)
+            encoded_images = tf.stack(encoded_images, axis = 1)
             preds = []
 
             if self.network_name == "MN":
-                for image in tf.unpack(self.target_image, axis=1):  #produce embeddings for support set images
+                for image in tf.unstack(self.target_image, axis=1):  #produce embeddings for support set images
                     single_target = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
                     similarities = self.dn(support_set=encoded_images, input_image=single_target, name="cosine",
                                            training=self.is_training)
@@ -229,10 +228,10 @@ class OneshotNetwork:
                 support_image = tf.expand_dims(encoded_images, 3) #[bs, sl, 64,1]
                 support_set_labels = tf.expand_dims(support_set_labels, 2) #[bs, sl, 1, nc]
 
-                class_embedding = tf.reduce_sum(tf.batch_matmul(support_image, support_set_labels), 1) #[bs, sl, 64, nc]
+                class_embedding = tf.reduce_sum(tf.matmul(support_image, support_set_labels), 1) #[bs, sl, 64, nc]
                 class_embedding = class_embedding/self.num_samples_per_class
                 class_embedding = tf.transpose(tf.squeeze(class_embedding), perm = [0, 2, 1]) #[bs, nc, 64]
-                for image in tf.unpack(self.target_image, axis=1)[:nclasses]:  #produce embeddings for support set images
+                for image in tf.unstack(self.target_image, axis=1)[:nclasses]:  #produce embeddings for support set images
                     single_target = self.g(image_input=image, training=self.is_training, keep_prob=self.keep_prob)
                     single_pred = self.dn(support_set=class_embedding, input_image=single_target, name="euclidean", training=self.is_training)
                     preds.append(single_pred)
@@ -242,7 +241,7 @@ class OneshotNetwork:
                 assert False
 
             target_label = tf.slice(self.target_label, [0,0], [-1, nclasses])
-            preds = tf.pack(preds, axis = 1)
+            preds = tf.stack(preds, axis = 1)
             correct_prediction = tf.equal(tf.argmax(preds, 2), tf.cast(target_label, tf.int64))
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
             crossentropy_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_label,
@@ -283,7 +282,7 @@ class OneshotNetwork:
         """
         losses = self.loss()
         c_error_opt_op = self.train(losses)
-        summary = tf.merge_all_summaries()
+        summary = tf.summary.merge_all()
         return  summary, losses, c_error_opt_op
 
 

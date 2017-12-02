@@ -18,7 +18,7 @@ class OmniglotNShotDataset():
              For a 5-way, 10-shot learning task, use classes_per_set=5 and samples_per_class=10
         """
         np.random.seed(seed)
-        self.x = np.load("omniglot.npy")
+        self.x = np.load("/data/omniglot.npy")
         self.x = np.reshape(self.x, newshape=(1622, 20, 28, 28, 1))
         self.x_train, self.x_test, self.x_val = self.x[:1200], self.x[1200:1411], self.x[1411:]
         self.normalization()
@@ -172,8 +172,8 @@ class CIFAR_100():
              For a 5-way, 10-shot learning task, use classes_per_set=5 and samples_per_class=10
         """
         np.random.seed(seed)
-        train_dict = unpickle('/home/weilin/OneShot/CIFAR_100/train')
-        test_dict = unpickle('/home/weilin/OneShot/CIFAR_100/test')
+        train_dict = unpickle('/home/weilin/OneShot/data/CIFAR_100/train')
+        test_dict = unpickle('/home/weilin/OneShot/data/CIFAR_100/test')
         X_train = train_dict[b'data']
         X_test = test_dict[b'data']
         y_train = train_dict[b'fine_labels']

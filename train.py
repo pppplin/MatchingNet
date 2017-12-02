@@ -19,13 +19,13 @@ network_name = "PN" #MN(matchingnet) or PN(prototypical)
 batch_size = 16
 
 continue_from_epoch = -1   # use -1 to start from scratch
-epochs = 30
+epochs = 3
 
 # epochs = --0-200
 logs_path = "outputs/"
 
 fce = False
-experiment_name = logs_path + "{}_{}_{}".format("BI", classes_train, classes_test)
+experiment_name = logs_path + "{}_{}_{}".format("BI_test", classes_train, classes_test)
 
 if data_name == "cifar":
     channels = 3

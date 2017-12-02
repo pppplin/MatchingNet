@@ -1,4 +1,5 @@
 import csv
+import numpy as np
 
 def save_statistics(experiment_name, line_to_add):
     with open("{}.csv".format(experiment_name), 'a') as f:
@@ -20,6 +21,12 @@ def load_statistics(experiment_name):
             for key, item in zip(data_labels, data):
                 data_dict[key].append(item)
     return data_dict
+
+def save_preds(epoch_idx, preds, labels):
+    fname = "preds_{}.txt".format(epoch_idx)
+    np.savetxt(fname, preds, fmt='%d', delimiter=' ', newline='\n')
+    fname = "labels_{}.txt".format(epoch_idx)
+    np.savetxt(fname, labels, fmt='%d', delimiter=' ', newline='\n')
 
 
 
